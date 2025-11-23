@@ -1,3 +1,4 @@
+
 import type { Atom } from './types';
 
 export const ATOMS: Omit<Atom, 'instanceId' | 'x' | 'y'>[] = [
@@ -171,4 +172,18 @@ export const COMMON_COMPOUNDS: { name: string; formula: string }[] = [
   { name: 'نترات البوتاسيوم', formula: 'KNO₃' },
   { name: 'أكسيد الحديد (III)', formula: 'Fe₂O₃' },
   { name: 'بيكربونات الصوديوم', formula: 'NaHCO₃' },
+  { name: 'برمنجنات البوتاسيوم', formula: 'KMnO₄' },
+  { name: 'ثاني كرومات البوتاسيوم', formula: 'K₂Cr₂O₇' },
+  { name: 'نترات الفضة', formula: 'AgNO₃' },
+  { name: 'كبريتات النحاس (II)', formula: 'CuSO₄' },
+  { name: 'إيثانول', formula: 'C₂H₅OH' },
+  { name: 'أسيتون', formula: 'CH₃COCH₃' },
+  { name: 'نترات الرصاص (II)', formula: 'Pb(NO₃)₂' },
+  { name: 'يوديد البوتاسيوم', formula: 'KI' },
+  { name: 'ثيوكبريتات الصوديوم', formula: 'Na₂S₂O₃' },
+  { name: 'بيروكسيد الهيدروجين', formula: 'H₂O₂' },
+  { name: 'حمض النيتريك', formula: 'HNO₃' },
+  { name: 'هيدروكسيد الكالسيوم', formula: 'Ca(OH)₂' },
+  { name: 'كبريتات المغنيسيوم', formula: 'MgSO₄' },
+  { name: 'كلوريد الأمونيوم', formula: 'NH₄Cl' },
 ];

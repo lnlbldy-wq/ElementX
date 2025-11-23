@@ -1,3 +1,4 @@
+
 import React from 'react';
 import type { Atom } from '../types';
 import { AtomIcon } from './AtomIcon';
@@ -27,7 +28,7 @@ export const ReactionCanvas: React.FC<ReactionCanvasProps> = ({
       ref={canvasRef}
       onDrop={onDrop}
       onDragOver={onDragOver}
-      className="flex-grow bg-slate-100 dark:bg-slate-800/50 relative overflow-hidden bg-grid dark:dark:bg-grid"
+      className="flex-grow bg-slate-100 dark:bg-slate-800/50 relative overflow-hidden bg-grid dark:bg-grid"
     >
       {animatedAtoms.map((atom) => (
         <div

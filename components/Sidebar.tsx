@@ -143,615 +143,453 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [solute, setSolute] = useState('NaCl');
   const [solvent, setSolvent] = useState('H₂O');
   const [concentration, setConcentration] = useState(1.0);
-
-  // Biochemistry state
-  const [bioSearchTerm, setBioSearchTerm] = useState('');
-
-
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, atomId: string) => {
+  
+  const handleDragStart = (e: React.DragEvent, atomId: string) => {
     e.dataTransfer.setData('application/react-flow', atomId);
     e.dataTransfer.effectAllowed = 'move';
   };
   
-  const handleReactClick = () => {
-    onCompoundReact(reactant1, reactant2);
-  }
-
-  const handleOrganicCompoundClick = () => {
-    if (isComparisonMode) {
-      onOrganicCompoundCompare(
-        { family: organicFamilyA, carbons: carbonCountA },
-        { family: organicFamilyB, carbons: carbonCountB }
-      );
-    } else {
-      onOrganicCompoundGenerate(organicFamilyA, carbonCountA);
-    }
-  }
-
-  const handleSuggestionClick = (formula: string) => {
-    if (activeInput === 'reactant1') {
-        setReactant1(formula);
-    } else if (activeInput === 'reactant2') {
-        setReactant2(formula);
-    }
-    setSuggestions([]);
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>, reactantSetter: React.Dispatch<React.SetStateAction<string>>) => {
-      const value = e.target.value;
-      reactantSetter(value);
-
-      if (value.trim()) {
-          const lowerCaseValue = value.toLowerCase();
-          const filtered = COMMON_COMPOUNDS.filter(
-              c => c.formula.toLowerCase().includes(lowerCaseValue) || c.name.toLowerCase().includes(lowerCaseValue)
-          );
-          setSuggestions(filtered);
-      } else {
-          setSuggestions([]);
-      }
-  };
-
-  // Close suggestions when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (compoundInputRef.current && !compoundInputRef.current.contains(event.target as Node)) {
-        setSuggestions([]);
-        setActiveInput(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
-  useEffect(() => {
-    // Reset biochemistry search term when mode changes for better UX
-    if (currentMode !== 'biochemistry') {
-      setBioSearchTerm('');
-    }
-  }, [currentMode]);
-
-  const filteredBiomolecules = useMemo(() => {
-    const lowercasedFilter = bioSearchTerm.trim().toLowerCase();
-    if (!lowercasedFilter) {
-        return biomolecules;
-    }
-
-    const filtered: Record<string, string[]> = {};
-    for (const [category, molecules] of Object.entries(biomolecules)) {
-        const matchingMolecules = molecules.filter(molecule =>
-            molecule.toLowerCase().includes(lowercasedFilter)
-        );
-        if (matchingMolecules.length > 0) {
-            filtered[category] = matchingMolecules;
-        }
-    }
-    return filtered;
-  }, [bioSearchTerm]);
-
-  const filteredAtoms = useMemo(() => {
-    const cleanedSearchTerm = searchTerm.trim().toLowerCase();
-    if (!cleanedSearchTerm) {
-      return atoms;
-    }
-    return atoms.filter(atom =>
-      atom.name.toLowerCase().includes(cleanedSearchTerm) ||
-      atom.symbol.toLowerCase().includes(cleanedSearchTerm) ||
-      atom.id.toLowerCase().includes(cleanedSearchTerm) // Also search by ID (e.g., 'H', 'Na', 'SO4')
-    );
-  }, [atoms, searchTerm]);
-
   const checkScrollability = useCallback(() => {
     const el = scrollContainerRef.current;
     if (el) {
       setCanScrollUp(el.scrollTop > 0);
-      const isScrollable = el.scrollHeight > el.clientHeight;
-      const isAtBottom = Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 1;
-      setCanScrollDown(isScrollable && !isAtBottom);
+      setCanScrollDown(el.scrollTop < el.scrollHeight - el.clientHeight);
     }
   }, []);
-
+  
   useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
     checkScrollability();
-    const resizeObserver = new ResizeObserver(checkScrollability);
-    resizeObserver.observe(el);
-    el.addEventListener('scroll', checkScrollability);
+    const el = scrollContainerRef.current;
+    el?.addEventListener('scroll', checkScrollability);
+    window.addEventListener('resize', checkScrollability);
     return () => {
-      resizeObserver.disconnect();
-      el.removeEventListener('scroll', checkScrollability);
+      el?.removeEventListener('scroll', checkScrollability);
+      window.removeEventListener('resize', checkScrollability);
     };
-  }, [filteredAtoms, checkScrollability, currentMode]);
+  }, [checkScrollability, currentMode]);
 
-  const scroll = (direction: 'up' | 'down') => {
-    if (scrollContainerRef.current) {
-      smoothScrollBy(scrollContainerRef.current, direction === 'up' ? -200 : 200, 400);
+  const handleScroll = (direction: 'up' | 'down') => {
+    const el = scrollContainerRef.current;
+    if (el) {
+      const scrollAmount = direction === 'up' ? -el.clientHeight * 0.8 : el.clientHeight * 0.8;
+      smoothScrollBy(el, scrollAmount, 300);
     }
   };
-  
-  const renderAtomsView = () => {
-    // Separate atoms and ions based on their designated color for grouping
-    const elements = filteredAtoms.filter(atom => atom.color !== 'bg-cyan-600');
-    const polyatomicIons = filteredAtoms.filter(atom => atom.color === 'bg-cyan-600');
 
-    const renderAtomList = (list: Omit<Atom, 'instanceId' | 'x' | 'y'>[]) => (
-      list.map((atom) => (
-        <div
-          key={atom.id}
-          className="flex flex-col items-center cursor-grab active:cursor-grabbing transform hover:scale-110 transition-transform duration-200"
-          draggable
-          onDragStart={(e) => handleDragStart(e, atom.id)}
-          onClick={() => onAtomClick(atom.id)}
-        >
-          <AtomIcon atom={atom as Atom} />
-          <span className="text-sm mt-2 text-slate-700 dark:text-slate-300">{atom.name}</span>
-        </div>
-      ))
-    );
+  const filteredAtoms = useMemo(() => {
+      if (!searchTerm) return atoms;
+      const lowerCaseSearchTerm = searchTerm.toLowerCase();
+      return atoms.filter(atom => 
+        atom.name.toLowerCase().includes(lowerCaseSearchTerm) ||
+        atom.symbol.toLowerCase().includes(lowerCaseSearchTerm)
+      );
+  }, [atoms, searchTerm]);
 
-    return (
-      <div className="w-full flex flex-col items-center h-full">
-        <div className="w-full p-2 flex-shrink-0">
-          <input
-              type="text"
-              placeholder="🔍 ابحث عن عنصر أو أيون..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-          />
-        </div>
-        
-        <button 
-          onClick={() => scroll('up')}
-          className="mb-2 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-cyan-500 dark:text-cyan-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-          aria-label="Scroll up"
-          disabled={!canScrollUp}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
-        </button>
-
-        <div ref={scrollContainerRef} className="flex-grow w-full overflow-y-auto scroll-smooth scrollbar-hide">
-          <div className="flex flex-col gap-5 items-center w-full py-2">
-              {renderAtomList(elements)}
-
-              {polyatomicIons.length > 0 && (
-                <>
-                  <div className="w-11/12 pt-4 mt-4 border-t-2 border-slate-300 dark:border-slate-600">
-                    <h3 className="text-md font-semibold text-cyan-600 dark:text-cyan-400 text-center">
-                      الأيونات متعددة الذرات
-                    </h3>
-                  </div>
-                  {renderAtomList(polyatomicIons)}
-                </>
-              )}
-
-              {filteredAtoms.length === 0 && (
-                  <div className="text-center text-slate-500 dark:text-slate-400 p-4">
-                      لا توجد عناصر أو أيونات مطابقة
-                  </div>
-              )}
-          </div>
-        </div>
-        
-        <button 
-          onClick={() => scroll('down')}
-          className="mt-2 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-cyan-500 dark:text-cyan-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-          aria-label="Scroll down"
-          disabled={!canScrollDown}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
-        </button>
-      </div>
-    );
+  const handleSuggestionClick = (compound: { name: string; formula: string }) => {
+    if (activeInput === 'reactant1') {
+        setReactant1(compound.formula);
+        setActiveInput('reactant2');
+    } else if (activeInput === 'reactant2') {
+        setReactant2(compound.formula);
+        setActiveInput(null);
+    }
+    setSuggestions([]);
   };
 
-  const renderSuggestions = () => {
-    if (suggestions.length === 0 || activeInput === null) return null;
+  useEffect(() => {
+    const currentActiveInput = activeInput === 'reactant1' ? reactant1 : reactant2;
+    if (currentActiveInput && currentActiveInput.length > 0) {
+        const lowerCaseInput = currentActiveInput.toLowerCase();
+        const filtered = COMMON_COMPOUNDS.filter(c =>
+            c.name.toLowerCase().includes(lowerCaseInput) ||
+            c.formula.toLowerCase().replace(/[^a-z0-9]/g, '').includes(lowerCaseInput.replace(/[^a-z0-9]/g, ''))
+        ).slice(0, 5);
+        setSuggestions(filtered);
+    } else {
+        setSuggestions([]);
+    }
+  }, [reactant1, reactant2, activeInput]);
+  
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+        if (compoundInputRef.current && !compoundInputRef.current.contains(event.target as Node)) {
+            setActiveInput(null);
+        }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
-    return (
-        <div className="absolute left-0 right-0 top-full mt-1 w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md shadow-lg z-20 max-h-48 overflow-y-auto scrollbar-hide">
-            {suggestions.map((s) => (
+  const renderAtomModeContent = () => (
+     <>
+        <div className="p-4 flex-shrink-0">
+          <input
+            type="text"
+            placeholder="بحث بالاسم أو الرمز..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          />
+        </div>
+
+        <div className="relative flex-grow">
+          {canScrollUp && (
+            <button
+              onClick={() => handleScroll('up')}
+              className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-8 bg-gradient-to-b from-slate-100 dark:from-slate-800 to-transparent z-10 flex items-start justify-center text-slate-500 dark:text-slate-400"
+              aria-label="Scroll up"
+            >
+              ▲
+            </button>
+          )}
+
+          <div ref={scrollContainerRef} className="h-full overflow-y-auto p-4 scrollbar-hide">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {filteredAtoms.map((atom) => (
                 <div
-                    key={s.formula}
-                    onClick={() => handleSuggestionClick(s.formula)}
-                    className="p-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 flex justify-between items-center"
+                  key={atom.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, atom.id)}
+                  onClick={() => onAtomClick(atom.id)}
+                  className="flex flex-col items-center p-2 rounded-lg bg-slate-200 dark:bg-slate-700/50 hover:bg-slate-300 dark:hover:bg-slate-700 cursor-pointer transition-colors"
                 >
-                    <span className="font-mono text-slate-800 dark:text-slate-200">{s.formula}</span>
-                    <span className="text-sm text-slate-500 dark:text-slate-400">{s.name}</span>
+                  <AtomIcon atom={atom} />
+                  <span className="mt-2 text-xs font-bold text-center text-slate-700 dark:text-slate-200">
+                    {atom.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {canScrollDown && (
+            <button
+              onClick={() => handleScroll('down')}
+              className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/4 h-8 bg-gradient-to-t from-slate-100 dark:from-slate-800 to-transparent z-10 flex items-end justify-center text-slate-500 dark:text-slate-400"
+              aria-label="Scroll down"
+            >
+              ▼
+            </button>
+          )}
+        </div>
+    </>
+  );
+
+  const organicFamilies = ['ألكان', 'ألكين', 'ألكاين', 'ألكان حلقي', 'حلقة بنزين', 'كحول', 'هاليد الألكيل', 'إيثر', 'أمين', 'ألدهيد', 'كيتون', 'حمض كربوكسيلي', 'إستر', 'أميد'];
+  const electrodes = ['Zn', 'Cu', 'Fe', 'Pb', 'Ag', 'Ni', 'Al', 'Mg'];
+  const solutes = ['NaCl', 'KCl', 'C₆H₁₂O₆', 'HCl', 'NaOH', 'CH₃COOH'];
+  const solvents = ['H₂O', 'C₂H₅OH'];
+  
+  const renderCompoundModeContent = () => (
+    <div ref={compoundInputRef} className="p-4 h-full flex flex-col justify-center relative">
+        <h3 className="text-xl font-bold text-center mb-4">تفاعل المركبات</h3>
+        <p className="text-sm text-center text-slate-500 dark:text-slate-400 mb-6">
+            اختر مركبين من المكتبة على اليسار أو اكتب صيغتيهما لبدء التفاعل.
+        </p>
+        
+        <div className="space-y-4">
+            <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المتفاعل 1</label>
+                <input
+                    type="text"
+                    placeholder="e.g., HCl"
+                    value={reactant1}
+                    onChange={(e) => setReactant1(e.target.value)}
+                    onFocus={() => setActiveInput('reactant1')}
+                    className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 font-mono"
+                />
+            </div>
+             <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المتفاعل 2</label>
+                <input
+                    type="text"
+                    placeholder="e.g., NaOH"
+                    value={reactant2}
+                    onChange={(e) => setReactant2(e.target.value)}
+                    onFocus={() => setActiveInput('reactant2')}
+                    className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 font-mono"
+                />
+            </div>
+        </div>
+
+        {activeInput && suggestions.length > 0 && (
+            <div className="absolute left-4 right-4 mt-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg shadow-lg z-10 max-h-48 overflow-y-auto">
+                {suggestions.map(s => (
+                    <div
+                        key={s.formula}
+                        onClick={() => handleSuggestionClick(s)}
+                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer flex justify-between"
+                    >
+                        <span>{s.name}</span>
+                        <span className="font-mono text-slate-500 dark:text-slate-400">{s.formula}</span>
+                    </div>
+                ))}
+            </div>
+        )}
+
+        <button 
+            onClick={() => onCompoundReact(reactant1, reactant2)}
+            disabled={!reactant1 || !reactant2 || isCompoundLoading}
+            className="w-full mt-6 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
+        >
+            {isCompoundLoading ? '...جاري التفاعل' : 'بدء التفاعل'}
+        </button>
+    </div>
+  );
+  
+  const renderOrganicModeContent = () => (
+     <div className="p-4 h-full flex flex-col justify-center">
+        <h3 className="text-xl font-bold text-center mb-4">الكيمياء العضوية</h3>
+        
+        <div className="flex justify-center mb-4">
+            <div className="bg-slate-200 dark:bg-slate-700 p-1 rounded-full flex text-sm">
+                <button
+                    onClick={() => setIsComparisonMode(false)}
+                    className={`px-4 py-1 rounded-full ${!isComparisonMode ? 'bg-white dark:bg-slate-600 shadow' : ''}`}
+                >
+                    فردي
+                </button>
+                <button
+                    onClick={() => setIsComparisonMode(true)}
+                    className={`px-4 py-1 rounded-full ${isComparisonMode ? 'bg-white dark:bg-slate-600 shadow' : ''}`}
+                >
+                    مقارنة
+                </button>
+            </div>
+        </div>
+        
+        {/* Compound A */}
+        <div className={`p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-100/50 dark:bg-slate-800/50 mb-4 transition-all duration-300 ${!isComparisonMode ? 'opacity-100' : 'opacity-70'}`}>
+            <h4 className="font-bold text-center mb-2">{isComparisonMode ? 'المركب أ' : 'اختر المركب'}</h4>
+            <div className="space-y-3">
+                <div>
+                    <label htmlFor="familyA" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">العائلة</label>
+                    <select id="familyA" value={organicFamilyA} onChange={(e) => setOrganicFamilyA(e.target.value)} className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                        {organicFamilies.map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                </div>
+                 <div>
+                    <label htmlFor="carbonsA" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      عدد ذرات الكربون: <span className="font-bold">{carbonCountA}</span>
+                    </label>
+                    <input
+                      id="carbonsA"
+                      type="range"
+                      min="1"
+                      max="10"
+                      value={carbonCountA}
+                      onChange={(e) => setCarbonCountA(parseInt(e.target.value, 10))}
+                      className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                </div>
+            </div>
+        </div>
+        
+        {/* Compound B - Comparison Mode Only */}
+        {isComparisonMode && (
+             <div className="p-3 rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-100/50 dark:bg-slate-800/50 mb-4 animate-fade-in">
+                 <h4 className="font-bold text-center mb-2">المركب ب</h4>
+                <div className="space-y-3">
+                    <div>
+                        <label htmlFor="familyB" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">العائلة</label>
+                        <select id="familyB" value={organicFamilyB} onChange={(e) => setOrganicFamilyB(e.target.value)} className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                            {organicFamilies.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                    </div>
+                     <div>
+                        <label htmlFor="carbonsB" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                          عدد ذرات الكربون: <span className="font-bold">{carbonCountB}</span>
+                        </label>
+                        <input
+                          id="carbonsB"
+                          type="range"
+                          min="1"
+                          max="10"
+                          value={carbonCountB}
+                          onChange={(e) => setCarbonCountB(parseInt(e.target.value, 10))}
+                          className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                    </div>
+                </div>
+            </div>
+        )}
+        
+        <button 
+            onClick={
+              isComparisonMode 
+                ? () => onOrganicCompoundCompare({ family: organicFamilyA, carbons: carbonCountA }, { family: organicFamilyB, carbons: carbonCountB })
+                : () => onOrganicCompoundGenerate(organicFamilyA, carbonCountA)
+            }
+            disabled={isOrganicCompoundLoading || (isComparisonMode && organicFamilyA === organicFamilyB && carbonCountA === carbonCountB)}
+            className="w-full mt-2 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
+        >
+            {isOrganicCompoundLoading ? '...جاري التحميل' : (isComparisonMode ? 'قارن الآن' : 'إنشاء المركب')}
+        </button>
+    </div>
+  );
+
+   const renderBioModeContent = () => (
+     <div className="p-4 h-full flex flex-col justify-center">
+        <h3 className="text-xl font-bold text-center mb-4">الكيمياء الحيوية</h3>
+        <p className="text-sm text-center text-slate-500 dark:text-slate-400 mb-6">
+            اختر جزيئًا حيويًا شائعًا من القوائم أدناه لعرض معلومات مفصلة عنه.
+        </p>
+
+        <div className="space-y-4">
+            {Object.entries(biomolecules).map(([category, molecules]) => (
+                <div key={category}>
+                    <h4 className="font-semibold text-slate-700 dark:text-slate-300 mb-2">{category}</h4>
+                    <div className="flex flex-wrap gap-2">
+                        {molecules.map(molecule => (
+                            <button
+                                key={molecule}
+                                onClick={() => onBiomoleculeGenerate(molecule)}
+                                disabled={isBiomoleculeLoading}
+                                className="px-3 py-1 bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-full text-sm hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors disabled:opacity-50"
+                            >
+                                {molecule}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             ))}
         </div>
-    );
-  }
-
-  const renderCompoundsView = () => (
-    <div className="p-4 w-full flex flex-col gap-4 flex-grow" ref={compoundInputRef}>
-        <h2 className="text-lg font-bold text-center text-cyan-600 dark:text-cyan-400">تفاعل مركبين</h2>
-        
-        <div className="relative">
-            <label htmlFor="reactant1" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المتفاعل الأول</label>
-            <input
-                type="text"
-                id="reactant1"
-                placeholder="e.g., HCl"
-                value={reactant1}
-                onChange={(e) => handleInputChange(e, setReactant1)}
-                onFocus={() => setActiveInput('reactant1')}
-                autoComplete="off"
-                className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-            />
-            {activeInput === 'reactant1' && renderSuggestions()}
-        </div>
-
-        <div className="relative">
-            <label htmlFor="reactant2" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المتفاعل الثاني</label>
-            <input
-                type="text"
-                id="reactant2"
-                placeholder="e.g., NaOH"
-                value={reactant2}
-                onChange={(e) => handleInputChange(e, setReactant2)}
-                onFocus={() => setActiveInput('reactant2')}
-                autoComplete="off"
-                className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-            />
-            {activeInput === 'reactant2' && renderSuggestions()}
-        </div>
-
-        <div className="pt-2">
-            <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-2 text-center">أو اختر من المركبات الشائعة</h3>
-            <div className="grid grid-cols-3 gap-2">
-                {COMMON_COMPOUNDS.slice(0, 6).map(compound => (
-                    <button
-                        key={compound.formula}
-                        onClick={() => {
-                           if (activeInput === 'reactant1') {
-                               setReactant1(compound.formula);
-                           } else if (activeInput === 'reactant2') {
-                               setReactant2(compound.formula);
-                           } else {
-                               if (!reactant1) setReactant1(compound.formula);
-                               else if (!reactant2) setReactant2(compound.formula);
-                           }
-                           setSuggestions([]);
-                        }}
-                        title={compound.name}
-                        className="px-2 py-2 text-sm font-mono bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-md whitespace-nowrap hover:bg-cyan-200 dark:hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all text-center"
-                    >
-                        {compound.formula}
-                    </button>
-                ))}
-            </div>
-        </div>
-
-        <button
-            onClick={handleReactClick}
-            disabled={isCompoundLoading || !reactant1 || !reactant2}
-            className="mt-auto w-full bg-green-500 hover:bg-green-600 dark:bg-green-600 dark:hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
-        >
-            {isCompoundLoading ? '...يتم التحليل' : 'بدء التفاعل'}
-        </button>
+         {isBiomoleculeLoading && <div className="text-center mt-4 text-sm text-slate-500 animate-pulse">...جاري التحميل</div>}
     </div>
   );
   
-  const OrganicCompoundGenerator: React.FC<{
-    title: string;
-    family: string;
-    onFamilyChange: (family: string) => void;
-    carbonCount: number;
-    onCarbonCountChange: (count: number) => void;
-  }> = ({ title, family, onFamilyChange, carbonCount, onCarbonCountChange }) => {
-    
-    const minCarbons = useMemo(() => {
-        switch (family) {
-            case 'ألكين': case 'ألكاين': case 'إيثر': case 'إستر': return 2;
-            case 'ألكان حلقي': case 'كيتون': return 3;
-            default: return 1; // ألكان، كحول، هاليد، أمين، ألدهيد، حمض كربوكسيلي، أميد
-        }
-    }, [family]);
-
-    useEffect(() => {
-        if (carbonCount < minCarbons) {
-            onCarbonCountChange(minCarbons);
-        }
-    }, [family, minCarbons, carbonCount, onCarbonCountChange]);
-    
-    const handleFamilyChange = (newFamily: string) => {
-      onFamilyChange(newFamily);
-      if (newFamily === 'حلقة بنزين') {
-        onCarbonCountChange(6);
-      }
-    };
-
-    const families = [
-        'ألكان', 'ألكين', 'ألكاين', 'ألكان حلقي', 'حلقة بنزين', 'كحول', 
-        'هاليد الألكيل', 'إيثر', 'أمين', 'ألدهيد', 'كيتون', 
-        'حمض كربوكسيلي', 'إستر', 'أميد'
-    ];
-
-    return (
-    <div className="p-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white/50 dark:bg-slate-800/50">
-        {title && <h3 className="text-md font-bold text-center text-slate-700 dark:text-slate-300 mb-3">{title}</h3>}
-        <div>
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">العائلة / المجموعة الوظيفية</label>
-            <div className="grid grid-cols-3 gap-1 bg-slate-200 dark:bg-slate-900/50 rounded-lg p-1 text-sm">
-                {families.map(f => (
-                    <button key={f} onClick={() => handleFamilyChange(f)}
-                        className={`flex-1 py-1 px-1.5 my-0.5 rounded-md transition-colors text-xs ${family === f ? 'bg-white dark:bg-slate-700 text-cyan-600 dark:text-cyan-300 shadow' : 'text-slate-600 dark:text-slate-400'}`}>
-                        {f}
-                    </button>
-                ))}
+  const renderElectroModeContent = () => (
+     <div className="p-4 h-full flex flex-col justify-center">
+        <h3 className="text-xl font-bold text-center mb-4">الكيمياء الكهربائية</h3>
+         <p className="text-sm text-center text-slate-500 dark:text-slate-400 mb-6">
+            اختر قطبين لبناء خلية جلفانية ومحاكاة عملها.
+        </p>
+        <div className="space-y-4">
+            <div>
+                <label htmlFor="electrode1" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">القطب 1 (المصعد المحتمل)</label>
+                <select id="electrode1" value={electrode1} onChange={(e) => setElectrode1(e.target.value)} className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    {electrodes.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+            </div>
+            <div>
+                <label htmlFor="electrode2" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">القطب 2 (المهبط المحتمل)</label>
+                <select id="electrode2" value={electrode2} onChange={(e) => setElectrode2(e.target.value)} className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    {electrodes.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
             </div>
         </div>
-        <div className="mt-3">
-             <label htmlFor={`carbonCount-${title}`} className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                ذرات الكربون: <span className="font-bold text-cyan-600 dark:text-cyan-400">{carbonCount}</span>
-            </label>
-            <input type="range" id={`carbonCount-${title}`} min={minCarbons} max="10" value={carbonCount}
-                onChange={(e) => onCarbonCountChange(parseInt(e.target.value, 10))}
-                disabled={family === 'حلقة بنزين'}
-                className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
-        </div>
-        {family === 'ألكان حلقي' && (
-          <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-700">
-            <h4 className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 text-center">أمثلة شائعة</h4>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <button onClick={() => onCarbonCountChange(3)} className="py-1 px-2 rounded-md bg-slate-200 dark:bg-slate-700 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition-colors">بروبان حلقي</button>
-              <button onClick={() => onCarbonCountChange(4)} className="py-1 px-2 rounded-md bg-slate-200 dark:bg-slate-700 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition-colors">بيوتان حلقي</button>
-              <button onClick={() => onCarbonCountChange(5)} className="py-1 px-2 rounded-md bg-slate-200 dark:bg-slate-700 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition-colors">بنتان حلقي</button>
-              <button onClick={() => onCarbonCountChange(6)} className="py-1 px-2 rounded-md bg-slate-200 dark:bg-slate-700 hover:bg-cyan-100 dark:hover:bg-cyan-800 transition-colors">هكسان حلقي</button>
-            </div>
-          </div>
-        )}
-    </div>
-  )};
-
-  const renderOrganicView = () => (
-    <div className="p-2 w-full flex flex-col gap-3 flex-grow overflow-y-auto scrollbar-hide">
-        <h2 className="text-lg font-bold text-center text-cyan-600 dark:text-cyan-400 flex-shrink-0">استكشف المركبات العضوية</h2>
-        
-        <div className="flex items-center justify-center gap-2 flex-shrink-0">
-            <span className={`text-sm font-medium ${!isComparisonMode ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-500'}`}>مركب واحد</span>
-            <button onClick={() => setIsComparisonMode(!isComparisonMode)} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${isComparisonMode ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${isComparisonMode ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-            <span className={`text-sm font-medium ${isComparisonMode ? 'text-indigo-500 dark:text-indigo-400' : 'text-slate-500'}`}>وضع المقارنة</span>
-        </div>
-
-        {isComparisonMode ? (
-          <>
-            <OrganicCompoundGenerator 
-              title="المركب 1"
-              family={organicFamilyA}
-              onFamilyChange={setOrganicFamilyA}
-              carbonCount={carbonCountA}
-              onCarbonCountChange={setCarbonCountA}
-            />
-            <OrganicCompoundGenerator 
-              title="المركب 2"
-              family={organicFamilyB}
-              onFamilyChange={setOrganicFamilyB}
-              carbonCount={carbonCountB}
-              onCarbonCountChange={setCarbonCountB}
-            />
-          </>
-        ) : (
-           <OrganicCompoundGenerator
-              title=""
-              family={organicFamilyA}
-              onFamilyChange={setOrganicFamilyA}
-              carbonCount={carbonCountA}
-              onCarbonCountChange={setCarbonCountA}
-            />
-        )}
-        
-        <button
-            onClick={handleOrganicCompoundClick}
-            disabled={isOrganicCompoundLoading}
-            className="mt-auto flex-shrink-0 w-full bg-indigo-500 hover:bg-indigo-600 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
+        <button 
+            onClick={() => onGalvanicCellSimulate(electrode1, electrode2)}
+            disabled={isGalvanicCellLoading || electrode1 === electrode2}
+            className="w-full mt-6 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
         >
-            {isOrganicCompoundLoading ? '...جاري التحميل' : (isComparisonMode ? 'مقارنة' : 'إنشاء')}
+            {isGalvanicCellLoading ? '...جاري المحاكاة' : 'بناء الخلية'}
         </button>
     </div>
   );
 
-  const renderBiochemistryView = () => {
-    return (
-        <div className="p-2 w-full flex flex-col gap-3 flex-grow overflow-y-auto scrollbar-hide">
-            <h2 className="text-lg font-bold text-center text-cyan-600 dark:text-cyan-400 flex-shrink-0">استكشاف الكيمياء الحيوية</h2>
-            <div className="w-full px-2 flex-shrink-0">
-                <input
-                    type="text"
-                    placeholder="🔍 ابحث عن جزيء حيوي..."
-                    value={bioSearchTerm}
-                    onChange={(e) => setBioSearchTerm(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+  const renderThermoModeContent = () => (
+     <div className="p-4 h-full flex flex-col justify-center">
+        <h3 className="text-xl font-bold text-center mb-4">الكيمياء الحرارية</h3>
+         <p className="text-sm text-center text-slate-500 dark:text-slate-400 mb-6">
+            أدخل معادلة كيميائية موزونة لتحليل تغيرات الطاقة المصاحبة لها.
+        </p>
+        <div className="space-y-4">
+            <div>
+                <label htmlFor="thermoEquation" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المعادلة الكيميائية</label>
+                <textarea
+                    id="thermoEquation"
+                    rows={3}
+                    placeholder="e.g., CH₄(g) + 2O₂(g) → CO₂(g) + 2H₂O(l)"
+                    value={thermoEquation}
+                    onChange={(e) => setThermoEquation(e.target.value)}
+                    className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 font-mono text-left"
+                    dir="ltr"
                 />
             </div>
-            <div className="flex flex-col gap-4 p-2">
-                {Object.entries(filteredBiomolecules).map(([category, molecules]) => (
-                    <div key={category}>
-                        <h3 className="text-md font-semibold text-slate-700 dark:text-slate-300 mb-2 border-b-2 border-cyan-500/50 pb-1">{category}</h3>
-                        <div className="grid grid-cols-2 gap-2">
-                            {molecules.map(molecule => (
-                                <button 
-                                    key={molecule} 
-                                    onClick={() => onBiomoleculeGenerate(molecule)}
-                                    disabled={isBiomoleculeLoading}
-                                    className="w-full text-sm bg-slate-200 dark:bg-slate-700/80 hover:bg-cyan-200 dark:hover:bg-cyan-800/80 text-slate-800 dark:text-slate-200 font-medium py-2 px-2 rounded-lg shadow-sm transition-colors disabled:bg-slate-400/50 dark:disabled:bg-slate-600/50 disabled:cursor-not-allowed"
-                                >
-                                    {molecule}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                ))}
-                {Object.keys(filteredBiomolecules).length === 0 && (
-                    <p className="text-center text-slate-500 dark:text-slate-400 mt-4">
-                        لا توجد نتائج مطابقة.
-                    </p>
-                )}
-            </div>
         </div>
-    );
-};
-
-
-  const renderElectrochemistryView = () => {
-    const metals = [
-        { symbol: 'Cu', name: 'نحاس' }, { symbol: 'Zn', name: 'زنك' }, { symbol: 'Ag', name: 'فضة' },
-        { symbol: 'Mg', name: 'مغنيسيوم' }, { symbol: 'Ni', name: 'نيكل' }, { symbol: 'Fe', name: 'حديد' },
-        { symbol: 'Al', name: 'ألومنيوم' }, { symbol: 'Pb', name: 'رصاص' }
-    ];
-    return (
-        <div className="p-4 w-full flex flex-col gap-4 flex-grow">
-            <h2 className="text-lg font-bold text-center text-cyan-600 dark:text-cyan-400">الكيمياء الكهربائية</h2>
-            <p className="text-sm text-center text-slate-600 dark:text-slate-400 -mt-2 mb-2">بناء خلية جلفانية.</p>
-            <div>
-                <label htmlFor="electrode1" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">القطب الأول</label>
-                <select id="electrode1" value={electrode1} onChange={e => setElectrode1(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none">
-                    {metals.map(m => <option key={m.symbol} value={m.symbol}>{m.name} ({m.symbol})</option>)}
-                </select>
-            </div>
-            <div>
-                <label htmlFor="electrode2" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">القطب الثاني</label>
-                <select id="electrode2" value={electrode2} onChange={e => setElectrode2(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none">
-                    {metals.map(m => <option key={m.symbol} value={m.symbol}>{m.name} ({m.symbol})</option>)}
-                </select>
-            </div>
-            <button
-                onClick={() => onGalvanicCellSimulate(electrode1, electrode2)}
-                disabled={isGalvanicCellLoading || electrode1 === electrode2}
-                className="mt-auto w-full bg-purple-500 hover:bg-purple-600 dark:bg-purple-600 dark:hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
-            >
-                {isGalvanicCellLoading ? "...جاري المحاكاة" : "محاكاة الخلية"}
-            </button>
-        </div>
-    );
-  };
-
-   const renderThermochemistryView = () => (
-    <div className="p-4 w-full flex flex-col gap-4 flex-grow">
-        <h2 className="text-lg font-bold text-center text-cyan-600 dark:text-cyan-400">الكيمياء الحرارية</h2>
-        <p className="text-sm text-center text-slate-600 dark:text-slate-400 -mt-2 mb-2">حلل طاقة التفاعلات الكيميائية.</p>
-        <div>
-            <label htmlFor="thermoEquation" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                أدخل معادلة كيميائية موزونة
-            </label>
-            <textarea
-                id="thermoEquation"
-                placeholder="e.g., CH₄(g) + 2O₂(g) → CO₂(g) + 2H₂O(l)"
-                value={thermoEquation}
-                onChange={(e) => setThermoEquation(e.target.value)}
-                rows={3}
-                className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none font-mono"
-            />
-        </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400 -mt-2">
-            تأكد من تضمين حالات المادة (g, l, s, aq) للحصول على أدق النتائج.
-        </p>
-        <button
+        <button 
             onClick={() => onThermoAnalyze(thermoEquation)}
-            disabled={isThermoLoading || !thermoEquation.trim()}
-            className="mt-auto w-full bg-orange-500 hover:bg-orange-600 dark:bg-orange-600 dark:hover:bg-orange-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
+            disabled={isThermoLoading || !thermoEquation}
+            className="w-full mt-6 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
         >
-            {isThermoLoading ? "...جاري التحليل" : "تحليل التفاعل"}
+            {isThermoLoading ? '...جاري التحليل' : 'تحليل التفاعل'}
         </button>
     </div>
   );
 
-  const renderSolutionView = () => {
-    const solutes = [
-        { name: 'ملح الطعام', formula: 'NaCl' },
-        { name: 'سكر المائدة', formula: 'C₁₂H₂₂O₁₁' },
-        { name: 'هيدروكسيد الصوديوم', formula: 'NaOH' },
-        { name: 'حمض الهيدروكلوريك', formula: 'HCl' },
-        { name: 'نترات الفضة', formula: 'AgNO₃' },
-    ];
-    const solvents = [
-        { name: 'ماء', formula: 'H₂O' },
-        { name: 'إيثانول', formula: 'C₂H₅OH' },
-        { name: 'هكسان', formula: 'C₆H₁₄' },
-    ];
-
-    return (
-        <div className="p-4 w-full flex flex-col gap-4 flex-grow">
-            <h2 className="text-lg font-bold text-center text-cyan-600 dark:text-cyan-400">كيمياء المحاليل</h2>
-            <p className="text-sm text-center text-slate-600 dark:text-slate-400 -mt-2 mb-2">محاكاة عملية الذوبان.</p>
+  const renderSolutionModeContent = () => (
+     <div className="p-4 h-full flex flex-col justify-center">
+        <h3 className="text-xl font-bold text-center mb-4">كيمياء المحاليل</h3>
+         <p className="text-sm text-center text-slate-500 dark:text-slate-400 mb-6">
+            اختر مذابًا ومذيبًا وحدد التركيز لتحليل عملية الذوبان.
+        </p>
+        <div className="space-y-4">
             <div>
                 <label htmlFor="solute" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المذاب</label>
-                <select id="solute" value={solute} onChange={e => setSolute(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none">
-                    {solutes.map(s => <option key={s.formula} value={s.formula}>{s.name} ({s.formula})</option>)}
-                </select>
-            </div>
-            <div>
-                <label htmlFor="solvent" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المذيب</label>
-                <select id="solvent" value={solvent} onChange={e => setSolvent(e.target.value)} className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none">
-                    {solvents.map(s => <option key={s.formula} value={s.formula}>{s.name} ({s.formula})</option>)}
+                <select id="solute" value={solute} onChange={(e) => setSolute(e.target.value)} className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    {solutes.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
             </div>
              <div>
+                <label htmlFor="solvent" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">المذيب</label>
+                <select id="solvent" value={solvent} onChange={(e) => setSolvent(e.target.value)} className="w-full p-2 rounded-lg bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    {solvents.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+            </div>
+            <div>
                 <label htmlFor="concentration" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    التركيز (مول/لتر): <span className="font-bold text-cyan-600 dark:text-cyan-400">{concentration.toFixed(1)} M</span>
+                      التركيز (مولار): <span className="font-bold">{concentration.toFixed(2)} M</span>
                 </label>
                 <input
-                    type="range"
-                    id="concentration"
-                    min="0.1"
-                    max="2.0"
-                    step="0.1"
-                    value={concentration}
-                    onChange={(e) => setConcentration(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                  id="concentration"
+                  type="range"
+                  min="0.1"
+                  max="5.0"
+                  step="0.1"
+                  value={concentration}
+                  onChange={(e) => setConcentration(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 />
             </div>
-            <button
-                onClick={() => onSolutionAnalyze(solute, solvent, concentration)}
-                disabled={isSolutionLoading}
-                className="mt-auto w-full bg-blue-500 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
-            >
-                {isSolutionLoading ? "...جاري التحليل" : "تحليل المحلول"}
-            </button>
         </div>
-    );
-  };
+        <button 
+            onClick={() => onSolutionAnalyze(solute, solvent, concentration)}
+            disabled={isSolutionLoading}
+            className="w-full mt-6 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed"
+        >
+            {isSolutionLoading ? '...جاري التحليل' : 'تحليل المحلول'}
+        </button>
+    </div>
+  );
+
 
   const renderContent = () => {
     switch(currentMode) {
-      case 'atoms': return renderAtomsView();
-      case 'compounds': return renderCompoundsView();
-      case 'organic': return renderOrganicView();
-      case 'biochemistry': return renderBiochemistryView();
-      case 'electrochemistry': return renderElectrochemistryView();
-      case 'thermochemistry': return renderThermochemistryView();
-      case 'solution': return renderSolutionView();
+      case 'atoms': return renderAtomModeContent();
+      case 'compounds': return renderCompoundModeContent();
+      case 'organic': return renderOrganicModeContent();
+      case 'biochemistry': return renderBioModeContent();
+      case 'electrochemistry': return renderElectroModeContent();
+      case 'thermochemistry': return renderThermoModeContent();
+      case 'solution': return renderSolutionModeContent();
       default: return null;
     }
   }
 
   return (
-    <aside className="w-80 bg-slate-100/80 dark:bg-slate-900/80 backdrop-blur-sm border-l border-slate-200 dark:border-slate-700 flex flex-col z-10 shadow-xl">
-        <div className="p-2 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
-            <div className="grid grid-cols-3 gap-2">
-                {/* FIX: Pass props explicitly to avoid TypeScript error with spread syntax and key prop. */}
-                {modes.map((m) => (
-                    <NavButton 
-                        key={m.mode}
-                        mode={m.mode}
-                        label={m.label}
-                        emoji={m.emoji}
-                        currentMode={currentMode}
-                        onModeChange={onModeChange}
-                    />
-                ))}
-            </div>
-        </div>
-        <div className="flex-grow flex flex-col overflow-y-auto scrollbar-hide">
-            {renderContent()}
-        </div>
+    <aside className="w-80 bg-slate-100 dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 flex flex-col z-10 shadow-lg">
+      <nav className="p-2 grid grid-cols-4 gap-2 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+          {modes.slice(0, 4).map(m => <NavButton key={m.mode} {...m} currentMode={currentMode} onModeChange={onModeChange} />)}
+      </nav>
+      <nav className="p-2 grid grid-cols-3 gap-2 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+           {modes.slice(4).map(m => <NavButton key={m.mode} {...m} currentMode={currentMode} onModeChange={onModeChange} />)}
+      </nav>
+      <div className="flex-grow flex flex-col overflow-hidden">
+        {renderContent()}
+      </div>
     </aside>
   );
 };

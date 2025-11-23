@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { COMMON_COMPOUNDS } from '../constants';
 
@@ -19,37 +19,111 @@ interface CompoundSelectorProps {
     error: string | null;
 }
 
-const fetchCompoundImage = async (name: string, formula: string): Promise<string> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-    const imagePrompt = `Generate a simple, visually appealing 3D ball-and-stick model of the ${name} molecule (${formula}). The image should have a clean, transparent background, soft studio lighting, and look professional for an educational app.`;
-    
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: imagePrompt }] },
-        config: { responseModalities: [Modality.IMAGE] },
-    });
-    
-    const partWithImageData = response?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+// Helper to safely check for retryable API errors
+const isRetryableError = (error: any): boolean => {
+    if (!error) return false;
 
-    if (partWithImageData?.inlineData) {
-        return `data:image/png;base64,${partWithImageData.inlineData.data}`;
+    const code = error?.error?.code;
+    if (code === 429 || code === 500 || code === 503) {
+        return true;
+    }
+
+    const status = (error?.error?.status || '').toUpperCase();
+    if (status === 'RESOURCE_EXHAUSTED' || status === 'UNAVAILABLE' || status === 'UNKNOWN') {
+        return true;
     }
     
-    throw new Error(`No image generated for ${name}`);
+    const message = (error.message || error.toString() || '').toLowerCase();
+    return (
+        message.includes('429') ||
+        message.includes('500') ||
+        message.includes('503') ||
+        message.includes('quota') ||
+        message.includes('rate limit') ||
+        message.includes('resource_exhausted') ||
+        message.includes('service unavailable') ||
+        message.includes('xhr error') // Handle generic network errors
+    );
 };
 
-const CompoundCard: React.FC<{
-    compound: CompoundWithImageState,
-    onSelect: () => void,
-    isSelected: boolean,
-    selectionLabel: string | null,
-    onLoadImage: () => void,
-}> = ({ compound, onSelect, isSelected, selectionLabel, onLoadImage }) => {
-    const isLoading = compound.imageUrl === 'loading';
+
+const fetchCompoundImage = async (name: string, formula: string): Promise<string> => {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const imagePrompt = `3D ball-and-stick model of the molecule with formula ${formula}. Clean transparent background, soft studio lighting. No text, no labels, no names.`;
+    
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    while (attempt < MAX_RETRIES) {
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash-image',
+                contents: { parts: [{ text: imagePrompt }] },
+                config: { responseModalities: [Modality.IMAGE] },
+            });
+            
+            const partWithImageData = response?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+
+            if (partWithImageData?.inlineData) {
+                return `data:image/png;base64,${partWithImageData.inlineData.data}`;
+            }
+            
+            throw new Error(`No image generated for ${name}`);
+        } catch (error: any) {
+            attempt++;
+            if (isRetryableError(error) && attempt < MAX_RETRIES) {
+                const delay = Math.pow(2, attempt) * 10000 + Math.random() * 1000; // Exponential backoff with jitter
+                console.warn(`API call failed for ${formula}. Retrying in ${Math.round(delay)}ms... (Attempt ${attempt})`, error);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                console.error(`API call failed for ${formula} after retries or with non-retryable error.`, error);
+                throw error;
+            }
+        }
+    }
+    throw new Error(`Failed to fetch image for ${name} after ${MAX_RETRIES} attempts.`);
+};
+
+
+interface CompoundCardProps {
+    compound: CompoundWithImageState;
+    onSelect: () => void;
+    isSelected: boolean;
+    selectionLabel: string | null;
+    onVisible: () => void;
+}
+
+const CompoundCard: React.FC<CompoundCardProps> = ({ compound, onSelect, isSelected, selectionLabel, onVisible }) => {
+    const cardRef = useRef<HTMLDivElement>(null);
+    const isLoading = compound.imageUrl === 'loading' || compound.imageUrl === null;
     const hasError = compound.imageUrl === 'error';
+
+    useEffect(() => {
+        const currentRef = cardRef.current;
+        if (!currentRef) return;
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    onVisible();
+                    observer.unobserve(currentRef);
+                }
+            },
+            { rootMargin: '100px', threshold: 0.1 }
+        );
+
+        observer.observe(currentRef);
+
+        return () => {
+            if (currentRef) {
+                observer.unobserve(currentRef);
+            }
+        };
+    }, [onVisible]);
+
 
     return (
         <div
+            ref={cardRef}
             className={`relative group bg-white dark:bg-slate-800 rounded-lg shadow-md hover:shadow-xl p-4 text-center transition-all duration-300 transform hover:-translate-y-1 border-2 ${isSelected ? 'border-cyan-500 ring-2 ring-cyan-500/50' : 'border-slate-200 dark:border-slate-700'}`}
         >
             <div className="h-28 w-28 object-contain mx-auto mb-3 flex items-center justify-center">
@@ -60,19 +134,8 @@ const CompoundCard: React.FC<{
                          <span className="text-4xl">⚠️</span>
                          <span className="text-xs font-semibold mt-1">فشل التحميل</span>
                     </div>
-                ) : compound.imageUrl ? (
-                    <img src={compound.imageUrl} alt={compound.name} className="h-full w-full object-contain" />
                 ) : (
-                    <div className="flex flex-col items-center justify-center">
-                        <span className="text-4xl text-slate-300 dark:text-slate-600">🧪</span>
-                        <button 
-                            onClick={onLoadImage} 
-                            disabled={isLoading}
-                            className="mt-2 text-xs bg-slate-200 dark:bg-slate-700 hover:bg-cyan-100 dark:hover:bg-cyan-800 px-3 py-1 rounded-md font-semibold text-slate-700 dark:text-slate-200 disabled:opacity-50 disabled:cursor-wait"
-                        >
-                           عرض الصورة
-                        </button>
-                    </div>
+                    <img src={compound.imageUrl!} alt={compound.name} className="h-full w-full object-contain" />
                 )}
             </div>
             
@@ -92,36 +155,54 @@ const CompoundCard: React.FC<{
 
 export const CompoundSelector: React.FC<CompoundSelectorProps> = ({ reactant1, reactant2, setReactant1, setReactant2, isLoading: isReactionLoading, error }) => {
     const [compounds, setCompounds] = useState<CompoundWithImageState[]>(
-        COMMON_COMPOUNDS.slice(0, 12).map(c => ({ ...c, imageUrl: null }))
+        COMMON_COMPOUNDS.map(c => ({ ...c, imageUrl: null }))
     );
+    const imageQueue = useRef<string[]>([]);
+    const isWorkerRunning = useRef(false);
     const loadingImagesRef = useRef(new Set<string>());
 
-    const handleLoadImage = useCallback(async (formula: string) => {
-        // Prevent concurrent requests for the same image
-        if (loadingImagesRef.current.has(formula)) {
+    const processQueue = useCallback(async () => {
+        if (imageQueue.current.length === 0) {
+            isWorkerRunning.current = false;
             return;
         }
 
-        const compoundInfo = COMMON_COMPOUNDS.find(c => c.formula === formula);
-        if (!compoundInfo) {
-            console.error("Compound info not found in constants for", formula);
-            return;
+        isWorkerRunning.current = true;
+        const formula = imageQueue.current.shift();
+
+        if (formula && !loadingImagesRef.current.has(formula)) {
+            const compoundInfo = COMMON_COMPOUNDS.find(c => c.formula === formula);
+            if (compoundInfo) {
+                try {
+                    loadingImagesRef.current.add(formula);
+                    setCompounds(prev => prev.map(p => p.formula === formula ? { ...p, imageUrl: 'loading' } : p));
+                    const imageUrl = await fetchCompoundImage(compoundInfo.name, compoundInfo.formula);
+                    setCompounds(prev => prev.map(p => p.formula === formula ? { ...p, imageUrl } : p));
+                } catch (err) {
+                    console.error(`Failed to load image for ${formula}:`, err);
+                    setCompounds(prev => prev.map(p => p.formula === formula ? { ...p, imageUrl: 'error' } : p));
+                } finally {
+                    loadingImagesRef.current.delete(formula);
+                }
+            }
+        }
+        
+        // Wait 3 seconds before processing the next item to avoid rate limiting
+        setTimeout(processQueue, 3000); 
+    }, []);
+
+    const scheduleImageLoad = useCallback((formula: string) => {
+        const compoundState = compounds.find(c => c.formula === formula);
+        // Only queue if it's not already loaded, errored, loading, or in the queue
+        if (compoundState?.imageUrl === null && !imageQueue.current.includes(formula)) {
+            imageQueue.current.push(formula);
         }
 
-        try {
-            loadingImagesRef.current.add(formula);
-            setCompounds(prev => prev.map(p => p.formula === formula ? { ...p, imageUrl: 'loading' } : p));
-
-            const imageUrl = await fetchCompoundImage(compoundInfo.name, compoundInfo.formula);
-            setCompounds(prev => prev.map(p => p.formula === formula ? { ...p, imageUrl } : p));
-        } catch (err) {
-            console.error(`Failed to load image for ${formula}:`, err);
-            setCompounds(prev => prev.map(p => p.formula === formula ? { ...p, imageUrl: 'error' } : p));
-        } finally {
-            loadingImagesRef.current.delete(formula);
+        if (!isWorkerRunning.current) {
+            processQueue();
         }
-    }, []); // This function is stable and does not depend on component state
-
+    }, [compounds, processQueue]);
+    
     const handleSelect = (formula: string) => {
         const isR1 = reactant1 === formula;
         const isR2 = reactant2 === formula;
@@ -161,7 +242,7 @@ export const CompoundSelector: React.FC<CompoundSelectorProps> = ({ reactant1, r
         <div className="w-full h-full p-4 flex flex-col">
             <div className="text-center mb-4 flex-shrink-0">
                 <h2 className="text-3xl font-bold text-cyan-600 dark:text-cyan-400 mb-2">مكتبة المركبات</h2>
-                <p className="text-slate-600 dark:text-slate-300">اختر مركبين للتفاعل. انقر على "عرض الصورة" لتحميل نموذج ثلاثي الأبعاد للمركب.</p>
+                <p className="text-slate-600 dark:text-slate-300">اختر مركبين للتفاعل. يتم تحميل نماذج المركبات عند ظهورها.</p>
             </div>
             <div className="flex-grow overflow-y-auto scrollbar-hide pr-2">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -172,7 +253,9 @@ export const CompoundSelector: React.FC<CompoundSelectorProps> = ({ reactant1, r
                             onSelect={() => handleSelect(compound.formula)}
                             isSelected={selectionMap.has(compound.formula)}
                             selectionLabel={selectionMap.get(compound.formula) || null}
-                            onLoadImage={() => handleLoadImage(compound.formula)}
+                            onVisible={() => {
+                                scheduleImageLoad(compound.formula);
+                            }}
                         />
                     ))}
                 </div>

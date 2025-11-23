@@ -1,5 +1,5 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-// FIX: Corrected the import path for the 'Atom' type.
 import type { Atom } from '../../types';
 
 // Constants for physics simulation
@@ -15,7 +15,7 @@ interface AnimatedAtom extends Atom {
 export const useAtomAnimation = (
   initialAtoms: Atom[],
   canvasRef: React.RefObject<HTMLDivElement>,
-  isPaused: boolean,
+  isPaused: boolean, // This is effectively 'isConverging' now
 ) => {
   const [animatedAtoms, setAnimatedAtoms] = useState<AnimatedAtom[]>([]);
   const animationFrameId = useRef<number | null>(null);
@@ -50,12 +50,18 @@ export const useAtomAnimation = (
 
       setAnimatedAtoms(prevAtoms => {
         if (isPaused) {
-            // When paused, smoothly move atoms to the center
-             return prevAtoms.map(atom => {
-                const targetX = canvasWidth / 2;
-                const targetY = canvasHeight / 2;
-                const newX = (atom.x ?? 0) + (targetX - (atom.x ?? 0)) * 0.1;
-                const newY = (atom.y ?? 0) + (targetY - (atom.y ?? 0)) * 0.1;
+            // When "paused" (or loading/analyzing), smoothly move atoms to form a cluster at the center
+             return prevAtoms.map((atom, index) => {
+                // Create a small offset based on index so they don't all stack on one pixel
+                const angle = (index / prevAtoms.length) * 2 * Math.PI;
+                const radius = 40; // Cluster radius
+                const targetX = (canvasWidth / 2) + Math.cos(angle) * radius;
+                const targetY = (canvasHeight / 2) + Math.sin(angle) * radius;
+                
+                // Stronger pull for convergence effect
+                const newX = (atom.x ?? 0) + (targetX - (atom.x ?? 0)) * 0.08;
+                const newY = (atom.y ?? 0) + (targetY - (atom.y ?? 0)) * 0.08;
+                
                 return {...atom, x: newX, y: newY, vx: 0, vy: 0};
             });
         }

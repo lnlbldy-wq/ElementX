@@ -15,6 +15,56 @@ interface ElectronConfigInfo {
     bondingExplanation: string;
 }
 
+const isRetryableError = (error: any): boolean => {
+    if (!error) return false;
+
+    const code = error?.error?.code;
+    if (code === 429 || code === 500 || code === 503) {
+        return true;
+    }
+
+    const status = (error?.error?.status || '').toUpperCase();
+    if (status === 'RESOURCE_EXHAUSTED' || status === 'UNAVAILABLE' || status === 'UNKNOWN') {
+        return true;
+    }
+    
+    const message = (error.message || error.toString() || '').toLowerCase();
+    return (
+        message.includes('429') ||
+        message.includes('500') ||
+        message.includes('503') ||
+        message.includes('quota') ||
+        message.includes('rate limit') ||
+        message.includes('resource_exhausted') ||
+        message.includes('service unavailable') ||
+        message.includes('xhr error') // Handle generic network errors
+    );
+};
+
+// FIX: Changed async arrow function to a function declaration to avoid TypeScript parsing issues in .tsx files.
+async function callApiWithRetry<T>(apiCall: () => Promise<T>): Promise<T> {
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    while (attempt < MAX_RETRIES) {
+        try {
+            return await apiCall();
+        } catch (error: any) {
+            attempt++;
+            if (isRetryableError(error) && attempt < MAX_RETRIES) {
+                const delay = Math.pow(2, attempt) * 10000 + Math.random() * 1000;
+                console.warn(`API call failed. Retrying in ${Math.round(delay)}ms... (Attempt ${attempt})`, error);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                console.error("API call failed after retries or with non-retryable error.", error);
+                throw error;
+            }
+        }
+    }
+    // This part should not be reachable if the loop logic is correct, but as a fallback:
+    throw new Error(`API call failed after ${MAX_RETRIES} attempts.`);
+};
+
+
 const InfoRow: React.FC<{ label: string; value?: React.ReactNode }> = ({ label, value }) => {
     if (!value) return null;
     return (
@@ -26,15 +76,16 @@ const InfoRow: React.FC<{ label: string; value?: React.ReactNode }> = ({ label, 
 };
 
 const GHSPictogram: React.FC<{ symbol: string }> = ({ symbol }) => {
+    // FIX: Corrected GHS symbols to use standard emojis for better visual representation.
     const symbolMap: Record<string, { emoji: string, title: string }> = {
         'GHS01': { emoji: '💣', title: 'Explosive' },
         'GHS02': { emoji: '🔥', title: 'Flammable' },
         'GHS03': { emoji: '💥', title: 'Oxidizing' },
         'GHS04': { emoji: '💨', title: 'Compressed Gas' },
-        'GHS05': { emoji: ' corrosive', title: 'Corrosive' },
+        'GHS05': { emoji: '🧪', title: 'Corrosive' },
         'GHS06': { emoji: '💀', title: 'Toxic' },
         'GHS07': { emoji: '!', title: 'Harmful' },
-        'GHS08': { emoji: ' हेल्थ', title: 'Health Hazard' },
+        'GHS08': { emoji: '⚕️', title: 'Health Hazard' },
         'GHS09': { emoji: '🌳', title: 'Environmental Hazard' },
     };
     const item = symbolMap[symbol];
@@ -67,10 +118,12 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
     setIsBalancing(true);
     setBalanceError(null);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-      const response: GenerateContentResponse = await ai.models.generateContent({
+      // FIX: Removed non-null assertion from API_KEY access.
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const reactantsList = reaction.reactants || [];
+      const response: GenerateContentResponse = await callApiWithRetry(() => ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: `Given the reactants that form the product ${reaction.formula}, provide a balanced chemical equation and a step-by-step guide on how to balance it. The reactants are formed from these atoms: ${reaction.reactants.join(', ')}. Assume standard states for reactants (e.g., Oxygen is O₂, Hydrogen is H₂). The response must be entirely in ARABIC.`,
+        contents: `Given the reactants that form the product ${reaction.formula}, provide a balanced chemical equation and a step-by-step guide on how to balance it. The reactants involved are typically composed of: ${reactantsList.join(', ') || 'constituent atoms'}. Assume standard states for reactants (e.g., Oxygen is O₂, Hydrogen is H₂). The response must be entirely in ARABIC.`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -89,7 +142,7 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
             required: ["balancedEquation", "steps"]
           }
         }
-      });
+      }));
       
       const rawText = response.text.trim();
       if (!rawText) {
@@ -118,8 +171,9 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
         setIsFetchingConfig(true);
         setConfigError(null);
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-            const response: GenerateContentResponse = await ai.models.generateContent({
+            // FIX: Removed non-null assertion from API_KEY access.
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const response: GenerateContentResponse = await callApiWithRetry(() => ai.models.generateContent({
                 model: 'gemini-2.5-flash',
                 contents: `For the molecule ${reaction.name} (${reaction.formula}), provide the ground-state electron configuration for each unique type of atom in the molecule. Also, briefly explain how the valence electrons of each atom type participate in bonding to form this molecule. The entire response must be in ARABIC.`,
                 config: {
@@ -144,7 +198,7 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
                         required: ["configurations"]
                     }
                 }
-            });
+            }));
 
             const rawText = response.text.trim();
             if (!rawText) {
@@ -172,20 +226,28 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
       setIsFetchingImage(true);
       setImageError(null);
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-          const response = await ai.models.generateContent({
+          // FIX: Removed non-null assertion from API_KEY access.
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          // Improved prompt for clarity and English labels
+          const response: GenerateContentResponse = await callApiWithRetry(() => ai.models.generateContent({
               model: 'gemini-2.5-flash-image',
               contents: {
                   parts: [
                       {
-                          text: `Generate a simple, clear, 2D Lewis structure diagram for the molecule ${reaction.name} (${reaction.formula}). The diagram should be chemically accurate, showing all valence electrons as dots and all covalent bonds as lines (single, double, or triple). Use a white background and black lines/text for maximum clarity. Do not include any text other than the atomic symbols.`,
+                          text: `Create a pristine, high-resolution, academic-textbook quality 2D Lewis structure diagram for the molecule ${reaction.formula}. 
+                          - The background must be pure white.
+                          - Lines for bonds must be sharp and black.
+                          - Valence electrons (dots) must be clearly visible and distinct.
+                          - Use standard English chemical symbols (e.g., H, C, O, N, Cl) for the atoms.
+                          - Do NOT use any Arabic text, labels, or non-standard annotations.
+                          - The diagram should be chemically precise and easy to read.`,
                       },
                   ],
               },
               config: {
                   responseModalities: [Modality.IMAGE],
               },
-          });
+          }));
 
           const partWithImageData = response?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
 
@@ -204,13 +266,13 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
       }
     };
 
-    const handleShowDetails = () => {
+    const handleShowDetails = async () => {
         setShowDetails(true);
         if (!lewisImage && !isFetchingImage) {
-            fetchLewisImage();
+            await fetchLewisImage();
         }
         if (!electronConfigs && !isFetchingConfig) {
-            fetchElectronConfig();
+            await fetchElectronConfig();
         }
     };
 
@@ -266,7 +328,7 @@ export const MoleculeInfoCard: React.FC<MoleculeInfoCardProps> = ({ reaction, on
              <div className="bg-white dark:bg-slate-900 p-4 rounded-md shadow-inner text-slate-800 dark:text-slate-200 flex justify-center items-center min-h-[150px]">
                 {isFetchingImage && <p className="animate-pulse text-slate-500 dark:text-slate-400">...جاري إنشاء الصورة</p>}
                 {imageError && <p className="text-red-500">{imageError}</p>}
-                {lewisImage && <img src={lewisImage} alt={`Lewis structure for ${reaction.name}`} className="max-w-full h-auto" />}
+                {lewisImage && <img src={lewisImage} alt={`Lewis structure for ${reaction.name}`} className="max-w-full h-auto bg-white" />}
             </div>
             
             <div className="mt-4 pt-4 border-t border-indigo-200 dark:border-indigo-600">

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -12,7 +13,7 @@ export const Header: React.FC<HeaderProps> = ({ theme, setTheme }) => {
       <div className="flex items-center gap-3">
         <div className="text-2xl">🔬</div>
         <h1 className="text-xl font-bold text-cyan-600 dark:text-cyan-300 tracking-wider">
-          مستكشف الكيمياء الشامل
+            ElementX
         </h1>
       </div>
       <div className="flex items-center gap-4">
